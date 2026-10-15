@@ -1,0 +1,102 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestRunCSV(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		args   []string
+		af     string
+		wantV6 bool
+	}{
+		{name: "IPv4 default", args: []string{"as015348"}, af: "v4"},
+		{name: "IPv6 flag", args: []string{"-6", "as015348"}, af: "v4,v6", wantV6: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("resource") != "AS15348" {
+					t.Errorf("unexpected resource: %s", r.URL.Query().Get("resource"))
+				}
+				switch r.URL.Path {
+				case "/data/as-overview/data.json":
+					fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"holder":"Example, Inc."}}`)
+				case "/data/ris-prefixes/data.json":
+					query := r.URL.Query()
+					if query.Get("list_prefixes") != "true" || query.Get("types") != "o" || query.Get("af") != test.af {
+						t.Errorf("unexpected query: %s", r.URL.RawQuery)
+					}
+					fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"prefixes":{"v4":{"originating":["203.0.113.0/24","192.0.2.0/24","203.0.113.0/24"]},"v6":{"originating":["2001:db8::/32"]}}}}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			var output bytes.Buffer
+			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}); err != nil {
+				t.Fatal(err)
+			}
+			want := "AS,Name,Prefix\nAS15348,\"Example, Inc.\",192.0.2.0/24\nAS15348,\"Example, Inc.\",203.0.113.0/24\n"
+			if test.wantV6 {
+				want += "AS15348,\"Example, Inc.\",2001:db8::/32\n"
+			}
+			if got := output.String(); got != want {
+				t.Errorf("CSV output:\n got %q\nwant %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRunNoPrefixes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "as-overview") {
+			fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"holder":null}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"prefixes":{}}}`)
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{"AS32491"}, &output, apiClient{server.URL, server.Client()}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "AS,Name,Prefix\nAS32491,,\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRunRejectsInvalidInputWithoutOutput(t *testing.T) {
+	var output bytes.Buffer
+	err := run(context.Background(), []string{"AS15348", "ASnope"}, &output, apiClient{})
+	if err == nil || !strings.Contains(err.Error(), "ASnope") {
+		t.Fatalf("expected invalid AS error, got %v", err)
+	}
+	if output.Len() != 0 {
+		t.Errorf("unexpected output: %q", output.String())
+	}
+}
+
+func TestRunAvoidsPartialCSVOnAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := run(context.Background(), []string{"AS15348"}, &output, apiClient{server.URL, server.Client()})
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("expected HTTP error, got %v", err)
+	}
+	if output.Len() != 0 {
+		t.Errorf("unexpected output: %q", output.String())
+	}
+}
