@@ -1,12 +1,19 @@
-# as-to-cidr
+# prefixes
 
 Print the currently originated IPv4 prefixes for one or more AS numbers as CSV.
 Add `-6` to include IPv6 prefixes.
 
+## Install
+
 ```sh
-go build -o as-to-cidr .
-./as-to-cidr AS15348 AS32491 > prefixes.csv
-./as-to-cidr -6 AS15348 AS32491 > prefixes-with-ipv6.csv
+go install github.com/st3fan/prefixes@latest
+```
+
+## Usage
+
+```sh
+prefixes AS15348 AS32491 > prefixes.csv
+prefixes -6 AS15348 AS32491 > prefixes-with-ipv6.csv
 ```
 
 The output has `AS,Name,Prefix` columns and one row per prefix. An AS with no
