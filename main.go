@@ -47,6 +47,18 @@ type prefixesData struct {
 	} `json:"prefixes"`
 }
 
+type asResult struct {
+	AS       string   `json:"as"`
+	Name     string   `json:"name"`
+	Prefixes []string `json:"prefixes"`
+}
+
+type prefixRow struct {
+	AS     string `json:"as"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+}
+
 func main() {
 	client := apiClient{
 		baseURL: ripeStatURL,
@@ -64,29 +76,38 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 	var asns []string
 	includeIPv6 := false
 	quiet := false
-	for _, arg := range args {
-		if arg == "-6" {
+	format := "minimal"
+	for i := 0; i < len(args); i++ {
+		switch arg := args[i]; arg {
+		case "-6":
 			includeIPv6 = true
-			continue
-		}
-		if arg == "-q" {
+		case "-q":
 			quiet = true
-			continue
+		case "-o":
+			if i+1 >= len(args) {
+				return errors.New("-o requires a format: json, csv, jsonl, or minimal")
+			}
+			i++
+			format = args[i]
+			if format != "json" && format != "csv" && format != "jsonl" && format != "minimal" {
+				return fmt.Errorf("invalid output format %q: expected json, csv, jsonl, or minimal", format)
+			}
+		default:
+			asn, err := parseASN(arg)
+			if err != nil {
+				return err
+			}
+			asns = append(asns, asn)
 		}
-		asn, err := parseASN(arg)
-		if err != nil {
-			return err
-		}
-		asns = append(asns, asn)
 	}
 	if len(asns) == 0 {
-		return errors.New("usage: prefixes [-6] [-q] AS15348 [AS32491 ...]")
+		return errors.New("usage: prefixes [-6] [-q] [-o json|csv|jsonl|minimal] AS15348 [AS32491 ...]")
 	}
 	if quiet {
 		logger = log.New(io.Discard, "", 0)
 	}
 
-	rows := [][]string{{"AS", "Name", "Prefix"}}
+	results := make([]asResult, 0, len(asns))
 	addressFamilies := "v4"
 	if includeIPv6 {
 		addressFamilies = "v4,v6"
@@ -135,12 +156,11 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 			return a.Bits() - b.Bits()
 		})
 
-		if len(prefixes) == 0 {
-			rows = append(rows, []string{asn, name, ""})
+		prefixStrings := make([]string, len(prefixes))
+		for i, prefix := range prefixes {
+			prefixStrings[i] = prefix.String()
 		}
-		for _, prefix := range prefixes {
-			rows = append(rows, []string{asn, name, prefix.String()})
-		}
+		results = append(results, asResult{AS: asn, Name: name, Prefixes: prefixStrings})
 
 		var asnV4, asnV6 big.Int
 		for _, prefix := range prefixes {
@@ -167,9 +187,51 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 	}
 	logger.Print(total)
 
-	w := csv.NewWriter(output)
-	if err := w.WriteAll(rows); err != nil {
-		return fmt.Errorf("write CSV: %w", err)
+	switch format {
+	case "json":
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(results); err != nil {
+			return fmt.Errorf("write JSON: %w", err)
+		}
+	case "csv":
+		rows := [][]string{{"AS", "Name", "Prefix"}}
+		for _, result := range results {
+			if len(result.Prefixes) == 0 {
+				rows = append(rows, []string{result.AS, result.Name, ""})
+			}
+			for _, prefix := range result.Prefixes {
+				rows = append(rows, []string{result.AS, result.Name, prefix})
+			}
+		}
+		w := csv.NewWriter(output)
+		if err := w.WriteAll(rows); err != nil {
+			return fmt.Errorf("write CSV: %w", err)
+		}
+	case "jsonl":
+		encoder := json.NewEncoder(output)
+		for _, result := range results {
+			if len(result.Prefixes) == 0 {
+				// Mirror CSV: a prefix-less AS still gets one row, with an empty prefix.
+				if err := encoder.Encode(prefixRow{AS: result.AS, Name: result.Name}); err != nil {
+					return fmt.Errorf("write JSONL: %w", err)
+				}
+				continue
+			}
+			for _, prefix := range result.Prefixes {
+				if err := encoder.Encode(prefixRow{AS: result.AS, Name: result.Name, Prefix: prefix}); err != nil {
+					return fmt.Errorf("write JSONL: %w", err)
+				}
+			}
+		}
+	case "minimal":
+		for _, result := range results {
+			for _, prefix := range result.Prefixes {
+				if _, err := fmt.Fprintln(output, prefix); err != nil {
+					return fmt.Errorf("write output: %w", err)
+				}
+			}
+		}
 	}
 	return nil
 }
