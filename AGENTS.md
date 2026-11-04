@@ -22,7 +22,8 @@ Single-package Go CLI that prints RIPEstat-originated prefixes for AS numbers as
 
 - All arguments are validated before any network I/O or output. Invalid input produces no partial CSV.
 - ANS are normalized to uppercase `ASn` (e.g. `as015348` → `AS15348`); the raw arg is rejected if it can't parse.
-- `-6` may appear anywhere in args and adds IPv6; nothing else is a flag.
+- Flags `-6` (include IPv6) and `-q` (suppress logging) may appear anywhere in args, order-independent; every non-flag argument must parse as an ASN.
+- Per-AS and final-total summaries are logged to stderr via the standard `log` package; CSV output goes to stdout. `-q` silences only those summaries — errors still print to stderr.
 - Prefixes are deduplicated and sorted by address, then prefix length.
 - CSV output is written only after all fetches succeed; errors go to stderr with exit 1. An AS with no visible prefixes gets one row with an empty `Prefix` column.
 

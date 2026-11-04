@@ -1,7 +1,8 @@
 # prefixes
 
 Print the currently originated IPv4 prefixes for one or more AS numbers as CSV.
-Add `-6` to include IPv6 prefixes.
+Add `-6` to include IPv6 prefixes. Add `-q` to suppress the progress summaries
+that are logged to stderr; CSV always goes to stdout.
 
 ## Install
 
