@@ -64,11 +64,17 @@ func main() {
 		baseURL: ripeStatURL,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
-	logger := log.New(os.Stderr, "prefixes: ", 0)
+	logger := log.New(os.Stderr, "", 0)
 	if err := run(context.Background(), os.Args[1:], os.Stdout, client, logger); err != nil {
-		fmt.Fprintln(os.Stderr, "prefixes:", err)
+		fmt.Fprintf(os.Stderr, "[%s] prefixes: %v\n", time.Now().UTC().Format(time.RFC3339), err)
 		os.Exit(1)
 	}
+}
+
+// logf writes one line to logger starting with a bracketed RFC 3339 UTC
+// timestamp. All log lines must go through this helper.
+func logf(logger *log.Logger, format string, args ...any) {
+	logger.Printf("[%s] %s", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }
 
 func run(ctx context.Context, args []string, output io.Writer, client apiClient, logger *log.Logger) error {
@@ -174,18 +180,18 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 		totalV6.Add(&totalV6, &asnV6)
 		totalPrefixes += uint64(len(prefixes))
 
-		summary := fmt.Sprintf("called RIPE to fetch %s: got %d prefixes with total of %s IPv4 IPs", asn, len(prefixes), &asnV4)
 		if includeIPv6 {
-			summary += fmt.Sprintf(" and %s IPv6 IPs", &asnV6)
+			logf(logger, "called RIPE to fetch %s: got %d prefixes with total of %s IPv4 IPs and %s IPv6 IPs", asn, len(prefixes), &asnV4, &asnV6)
+		} else {
+			logf(logger, "called RIPE to fetch %s: got %d prefixes with total of %s IPv4 IPs", asn, len(prefixes), &asnV4)
 		}
-		logger.Print(summary)
 	}
 
-	total := fmt.Sprintf("total: got %d prefixes with total of %s IPv4 IPs", totalPrefixes, &totalV4)
 	if includeIPv6 {
-		total += fmt.Sprintf(" and %s IPv6 IPs", &totalV6)
+		logf(logger, "total: got %d prefixes with total of %s IPv4 IPs and %s IPv6 IPs", totalPrefixes, &totalV4, &totalV6)
+	} else {
+		logf(logger, "total: got %d prefixes with total of %s IPv4 IPs", totalPrefixes, &totalV4)
 	}
-	logger.Print(total)
 
 	switch format {
 	case "json":

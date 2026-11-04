@@ -2,7 +2,8 @@
 
 Print the currently originated IPv4 prefixes for one or more AS numbers.
 Add `-6` to include IPv6 prefixes. Add `-q` to suppress the progress summaries
-that are logged to stderr; results always go to stdout.
+that are logged to stderr — each log line starts with a bracketed UTC
+timestamp. Results always go to stdout.
 
 ## Install
 
