@@ -51,7 +51,7 @@ func main() {
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
 	if err := run(context.Background(), os.Args[1:], os.Stdout, client); err != nil {
-		fmt.Fprintln(os.Stderr, "as-to-cidr:", err)
+		fmt.Fprintln(os.Stderr, "prefixes:", err)
 		os.Exit(1)
 	}
 }
@@ -72,7 +72,7 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient)
 		asns = append(asns, asn)
 	}
 	if len(asns) == 0 {
-		return errors.New("usage: as-to-cidr [-6] AS15348 [AS32491 ...]")
+		return errors.New("usage: prefixes [-6] AS15348 [AS32491 ...]")
 	}
 
 	rows := [][]string{{"AS", "Name", "Prefix"}}

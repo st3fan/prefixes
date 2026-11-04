@@ -1,3 +1,3 @@
-module github.com/st3fan/as-to-cidr
+module github.com/st3fan/prefixes
 
 go 1.27.1
