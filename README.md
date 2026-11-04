@@ -7,9 +7,22 @@ timestamp. Results always go to stdout.
 
 ## Install
 
+Requires Go 1.27 or newer (the module declares `go 1.27.1`).
+
 ```sh
 go install github.com/st3fan/prefixes@latest
 ```
+
+This downloads, builds, and installs the `prefixes` binary into
+`$(go env GOPATH)/bin` (usually `~/go/bin`). Make sure that directory is on
+your `PATH`, for example:
+
+```sh
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+To upgrade an existing installation, run the same command again. To pin a
+specific release instead of `@latest`, use its tag name.
 
 ## Usage
 
