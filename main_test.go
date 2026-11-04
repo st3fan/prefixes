@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,7 +43,7 @@ func TestRunCSV(t *testing.T) {
 			defer server.Close()
 
 			var output bytes.Buffer
-			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}); err != nil {
+			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}, log.New(io.Discard, "", 0)); err != nil {
 				t.Fatal(err)
 			}
 			want := "AS,Name,Prefix\nAS15348,\"Example, Inc.\",192.0.2.0/24\nAS15348,\"Example, Inc.\",203.0.113.0/24\n"
@@ -66,7 +68,7 @@ func TestRunNoPrefixes(t *testing.T) {
 	defer server.Close()
 
 	var output bytes.Buffer
-	if err := run(context.Background(), []string{"AS32491"}, &output, apiClient{server.URL, server.Client()}); err != nil {
+	if err := run(context.Background(), []string{"AS32491"}, &output, apiClient{server.URL, server.Client()}, log.New(io.Discard, "", 0)); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := output.String(), "AS,Name,Prefix\nAS32491,,\n"; got != want {
@@ -76,7 +78,7 @@ func TestRunNoPrefixes(t *testing.T) {
 
 func TestRunRejectsInvalidInputWithoutOutput(t *testing.T) {
 	var output bytes.Buffer
-	err := run(context.Background(), []string{"AS15348", "ASnope"}, &output, apiClient{})
+	err := run(context.Background(), []string{"AS15348", "ASnope"}, &output, apiClient{}, log.New(io.Discard, "", 0))
 	if err == nil || !strings.Contains(err.Error(), "ASnope") {
 		t.Fatalf("expected invalid AS error, got %v", err)
 	}
@@ -92,11 +94,78 @@ func TestRunAvoidsPartialCSVOnAPIError(t *testing.T) {
 	defer server.Close()
 
 	var output bytes.Buffer
-	err := run(context.Background(), []string{"AS15348"}, &output, apiClient{server.URL, server.Client()})
+	err := run(context.Background(), []string{"AS15348"}, &output, apiClient{server.URL, server.Client()}, log.New(io.Discard, "", 0))
 	if err == nil || !strings.Contains(err.Error(), "503") {
 		t.Fatalf("expected HTTP error, got %v", err)
 	}
 	if output.Len() != 0 {
 		t.Errorf("unexpected output: %q", output.String())
+	}
+}
+
+func TestRunLogging(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/data/as-overview/data.json":
+			fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"holder":"Example, Inc."}}`)
+		case "/data/ris-prefixes/data.json":
+			fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"prefixes":{"v4":{"originating":["203.0.113.0/24","192.0.2.0/24"]},"v6":{"originating":["2001:db8::/32"]}}}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "IPv4 default",
+			args: []string{"as015348"},
+			want: "called RIPE to fetch AS15348: got 2 prefixes with total of 512 IPv4 IPs\n" +
+				"total: got 2 prefixes with total of 512 IPv4 IPs\n",
+		},
+		{
+			name: "IPv6 flag",
+			args: []string{"-6", "as015348"},
+			want: "called RIPE to fetch AS15348: got 3 prefixes with total of 512 IPv4 IPs and 79228162514264337593543950336 IPv6 IPs\n" +
+				"total: got 3 prefixes with total of 512 IPv4 IPs and 79228162514264337593543950336 IPv6 IPs\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			var output bytes.Buffer
+			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}, log.New(&logs, "", 0)); err != nil {
+				t.Fatal(err)
+			}
+			if got := logs.String(); got != test.want {
+				t.Errorf("log output:\n got %q\nwant %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRunQuietSuppressesLogging(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "as-overview") {
+			fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"holder":"Example, Inc."}}`)
+			return
+		}
+		fmt.Fprint(w, `{"status":"ok","status_code":200,"data":{"prefixes":{"v4":{"originating":["192.0.2.0/24"]}}}}`)
+	}))
+	defer server.Close()
+
+	var logs bytes.Buffer
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{"-q", "AS15348"}, &output, apiClient{server.URL, server.Client()}, log.New(&logs, "", 0)); err != nil {
+		t.Fatal(err)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("expected no log output, got %q", logs.String())
+	}
+	if got, want := output.String(), "AS,Name,Prefix\nAS15348,\"Example, Inc.\",192.0.2.0/24\n"; got != want {
+		t.Errorf("CSV output:\n got %q\nwant %q", got, want)
 	}
 }

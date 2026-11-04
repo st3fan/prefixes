@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"math/big"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -50,19 +52,25 @@ func main() {
 		baseURL: ripeStatURL,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}
-	if err := run(context.Background(), os.Args[1:], os.Stdout, client); err != nil {
+	logger := log.New(os.Stderr, "prefixes: ", 0)
+	if err := run(context.Background(), os.Args[1:], os.Stdout, client, logger); err != nil {
 		fmt.Fprintln(os.Stderr, "prefixes:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, output io.Writer, client apiClient) error {
+func run(ctx context.Context, args []string, output io.Writer, client apiClient, logger *log.Logger) error {
 	// Check every argument before making requests or writing output.
 	var asns []string
 	includeIPv6 := false
+	quiet := false
 	for _, arg := range args {
 		if arg == "-6" {
 			includeIPv6 = true
+			continue
+		}
+		if arg == "-q" {
+			quiet = true
 			continue
 		}
 		asn, err := parseASN(arg)
@@ -72,7 +80,10 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient)
 		asns = append(asns, asn)
 	}
 	if len(asns) == 0 {
-		return errors.New("usage: prefixes [-6] AS15348 [AS32491 ...]")
+		return errors.New("usage: prefixes [-6] [-q] AS15348 [AS32491 ...]")
+	}
+	if quiet {
+		logger = log.New(io.Discard, "", 0)
 	}
 
 	rows := [][]string{{"AS", "Name", "Prefix"}}
@@ -80,6 +91,8 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient)
 	if includeIPv6 {
 		addressFamilies = "v4,v6"
 	}
+	var totalV4, totalV6 big.Int
+	var totalPrefixes uint64
 	for _, asn := range asns {
 		var overview overviewData
 		if err := client.fetch(ctx, "as-overview", asn, nil, &overview); err != nil {
@@ -128,13 +141,46 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient)
 		for _, prefix := range prefixes {
 			rows = append(rows, []string{asn, name, prefix.String()})
 		}
+
+		var asnV4, asnV6 big.Int
+		for _, prefix := range prefixes {
+			if prefix.Addr().Is4() {
+				asnV4.Add(&asnV4, ipCount(prefix))
+			} else {
+				asnV6.Add(&asnV6, ipCount(prefix))
+			}
+		}
+		totalV4.Add(&totalV4, &asnV4)
+		totalV6.Add(&totalV6, &asnV6)
+		totalPrefixes += uint64(len(prefixes))
+
+		summary := fmt.Sprintf("called RIPE to fetch %s: got %d prefixes with total of %s IPv4 IPs", asn, len(prefixes), &asnV4)
+		if includeIPv6 {
+			summary += fmt.Sprintf(" and %s IPv6 IPs", &asnV6)
+		}
+		logger.Print(summary)
 	}
+
+	total := fmt.Sprintf("total: got %d prefixes with total of %s IPv4 IPs", totalPrefixes, &totalV4)
+	if includeIPv6 {
+		total += fmt.Sprintf(" and %s IPv6 IPs", &totalV6)
+	}
+	logger.Print(total)
 
 	w := csv.NewWriter(output)
 	if err := w.WriteAll(rows); err != nil {
 		return fmt.Errorf("write CSV: %w", err)
 	}
 	return nil
+}
+
+// ipCount returns the number of addresses contained in a prefix.
+func ipCount(prefix netip.Prefix) *big.Int {
+	bits := 128
+	if prefix.Addr().Is4() {
+		bits = 32
+	}
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits-prefix.Bits()))
 }
 
 func parseASN(value string) (string, error) {
