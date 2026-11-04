@@ -8,9 +8,19 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// logTimestamp matches the bracketed RFC 3339 UTC timestamp that prefixes
+// every log line.
+var logTimestamp = regexp.MustCompile(`(?m)^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\] `)
+
+// stripTimestamps removes the leading timestamp from every log line.
+func stripTimestamps(logs string) string {
+	return logTimestamp.ReplaceAllString(logs, "")
+}
 
 func TestRunCSV(t *testing.T) {
 	for _, test := range []struct {
@@ -140,7 +150,13 @@ func TestRunLogging(t *testing.T) {
 			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}, log.New(&logs, "", 0)); err != nil {
 				t.Fatal(err)
 			}
-			if got := logs.String(); got != test.want {
+			got := logs.String()
+			for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+				if !logTimestamp.MatchString(line) {
+					t.Errorf("log line missing ISO timestamp: %q", line)
+				}
+			}
+			if got := stripTimestamps(got); got != test.want {
 				t.Errorf("log output:\n got %q\nwant %q", got, test.want)
 			}
 		})
