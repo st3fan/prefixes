@@ -257,6 +257,51 @@ func TestRunJSONOutputEmptyPrefixes(t *testing.T) {
 	}
 }
 
+func TestRunJSONLOutput(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		args     []string
+		overview string
+		prefixes string
+		want     string
+	}{
+		{
+			name:     "one object per prefix",
+			args:     []string{"-o", "jsonl", "as015348"},
+			overview: `{"status":"ok","status_code":200,"data":{"holder":"Example, Inc."}}`,
+			prefixes: `{"status":"ok","status_code":200,"data":{"prefixes":{"v4":{"originating":["203.0.113.0/24","192.0.2.0/24","203.0.113.0/24"]}}}}`,
+			want: "{\"as\":\"AS15348\",\"name\":\"Example, Inc.\",\"prefix\":\"192.0.2.0/24\"}\n" +
+				"{\"as\":\"AS15348\",\"name\":\"Example, Inc.\",\"prefix\":\"203.0.113.0/24\"}\n",
+		},
+		{
+			name:     "prefix-less AS gets empty prefix row",
+			args:     []string{"-o", "jsonl", "AS32491"},
+			overview: `{"status":"ok","status_code":200,"data":{"holder":null}}`,
+			prefixes: `{"status":"ok","status_code":200,"data":{"prefixes":{}}}`,
+			want:     "{\"as\":\"AS32491\",\"name\":\"\",\"prefix\":\"\"}\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.URL.Path, "as-overview") {
+					fmt.Fprint(w, test.overview)
+					return
+				}
+				fmt.Fprint(w, test.prefixes)
+			}))
+			defer server.Close()
+
+			var output bytes.Buffer
+			if err := run(context.Background(), test.args, &output, apiClient{server.URL, server.Client()}, log.New(io.Discard, "", 0)); err != nil {
+				t.Fatal(err)
+			}
+			if got := output.String(); got != test.want {
+				t.Errorf("JSONL output:\n got %q\nwant %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRunRejectsInvalidOutputFormat(t *testing.T) {
 	for _, test := range []struct {
 		name    string

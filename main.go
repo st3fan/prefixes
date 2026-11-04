@@ -53,6 +53,12 @@ type asResult struct {
 	Prefixes []string `json:"prefixes"`
 }
 
+type prefixRow struct {
+	AS     string `json:"as"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+}
+
 func main() {
 	client := apiClient{
 		baseURL: ripeStatURL,
@@ -79,12 +85,12 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 			quiet = true
 		case "-o":
 			if i+1 >= len(args) {
-				return errors.New("-o requires a format: json, csv, or minimal")
+				return errors.New("-o requires a format: json, csv, jsonl, or minimal")
 			}
 			i++
 			format = args[i]
-			if format != "json" && format != "csv" && format != "minimal" {
-				return fmt.Errorf("invalid output format %q: expected json, csv, or minimal", format)
+			if format != "json" && format != "csv" && format != "jsonl" && format != "minimal" {
+				return fmt.Errorf("invalid output format %q: expected json, csv, jsonl, or minimal", format)
 			}
 		default:
 			asn, err := parseASN(arg)
@@ -95,7 +101,7 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 		}
 	}
 	if len(asns) == 0 {
-		return errors.New("usage: prefixes [-6] [-q] [-o json|csv|minimal] AS15348 [AS32491 ...]")
+		return errors.New("usage: prefixes [-6] [-q] [-o json|csv|jsonl|minimal] AS15348 [AS32491 ...]")
 	}
 	if quiet {
 		logger = log.New(io.Discard, "", 0)
@@ -201,6 +207,22 @@ func run(ctx context.Context, args []string, output io.Writer, client apiClient,
 		w := csv.NewWriter(output)
 		if err := w.WriteAll(rows); err != nil {
 			return fmt.Errorf("write CSV: %w", err)
+		}
+	case "jsonl":
+		encoder := json.NewEncoder(output)
+		for _, result := range results {
+			if len(result.Prefixes) == 0 {
+				// Mirror CSV: a prefix-less AS still gets one row, with an empty prefix.
+				if err := encoder.Encode(prefixRow{AS: result.AS, Name: result.Name}); err != nil {
+					return fmt.Errorf("write JSONL: %w", err)
+				}
+				continue
+			}
+			for _, prefix := range result.Prefixes {
+				if err := encoder.Encode(prefixRow{AS: result.AS, Name: result.Name, Prefix: prefix}); err != nil {
+					return fmt.Errorf("write JSONL: %w", err)
+				}
+			}
 		}
 	case "minimal":
 		for _, result := range results {

@@ -22,10 +22,10 @@ Single-package Go CLI that prints RIPEstat-originated prefixes for AS numbers as
 
 - All arguments are validated before any network I/O or output. Invalid input produces no partial output.
 - ANS are normalized to uppercase `ASn` (e.g. `as015348` → `AS15348`); the raw arg is rejected if it can't parse.
-- Flags `-6` (include IPv6), `-q` (suppress logging), and `-o` (output format; consumes the next argument: `json`, `csv`, or `minimal`) may appear anywhere in args, order-independent; every non-flag argument must parse as an ASN.
+- Flags `-6` (include IPv6), `-q` (suppress logging), and `-o` (output format; consumes the next argument: `json`, `csv`, `jsonl`, or `minimal`) may appear anywhere in args, order-independent; every non-flag argument must parse as an ASN.
 - Per-AS and final-total summaries are logged to stderr via the standard `log` package; output of every format goes to stdout. `-q` silences only those summaries — errors still print to stderr.
 - Prefixes are deduplicated and sorted by address, then prefix length.
-- Default format is `minimal`: raw prefixes one per line, no header or metadata; a prefix-less AS adds nothing. `csv` keeps the `AS,Name,Prefix` rows (empty `Prefix` column for a prefix-less AS); `json` emits one object per AS with `as`, `name`, and a never-null `prefixes` array.
+- Default format is `minimal`: raw prefixes one per line, no header or metadata; a prefix-less AS adds nothing. `csv` keeps the `AS,Name,Prefix` rows (empty `Prefix` column for a prefix-less AS); `jsonl` mirrors those rows as one `{"as","name","prefix"}` object per line, including an empty-`prefix` line for a prefix-less AS; `json` emits one object per AS with `as`, `name`, and a never-null `prefixes` array.
 - All fetches complete before any output is written, regardless of format — a mid-run error produces no partial output and exits 1.
 
 ## Environment

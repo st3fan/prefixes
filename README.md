@@ -27,6 +27,9 @@ prefixes -o csv -6 AS15348 AS32491 > prefixes-with-ipv6.csv
   originating prefixes gets one row with an empty `Prefix`. Rows follow the
   order of the command-line AS numbers; prefixes within each AS are sorted.
 - `json`: an array with one object per AS number: `as`, `name`, and `prefixes`.
+- `jsonl`: one JSON object per line — `as`, `name`, and `prefix` — mirroring the
+  CSV columns. An AS with no visible prefixes gets one object with an empty
+  `prefix`.
 
 The command uses the [RIPEstat AS Overview](https://stat.ripe.net/docs/data-api/api-endpoints/as-overview)
 and [RIS Prefixes](https://stat.ripe.net/docs/data-api/api-endpoints/ris-prefixes)
